@@ -10,12 +10,18 @@ basic_result_op_map = {
     'substr': substr, 
     'mult': mult,
     'div': div,
-    
+    'and': and_op,
+    'or': or_op,
+    'not': not_op,
+    'eql': eql_op
 }
 
 basic_no_result_op_map = {
-    'return': return_op,
     'print': print_op,
+}
+
+control_flow_ops_map = {
+    'return': return_op,
     'if': if_op
 }
 
@@ -40,9 +46,23 @@ def execute_context(context_token, _globals, _locals):
             _locals[var.name] = var
         elif is_result_operator(tokens):
             op_name = tokens[2].value
+            
             param_tokens = tokens[3:]
             params = [_locals[token.value] for token in param_tokens]
             value = basic_op_map[op_name](*params, _locals=_locals) 
+            var_name = tokens[0].value
+            var = Variable(var_name, value.value, value._type)
+            _locals[var.name] = var
+        elif is_result_method(tokens):
+            op_name = tokens[2].value
+            param_tokens = tokens[3:]
+            params = [_locals[token.value] for token in param_tokens]
+            method_sign = _globals['method_tokens'][op_name]['signature']
+            method_tokens = _globals['method_tokens'][op_name]['tokens']
+           
+            value = execute_context(
+                method_tokens, _globals, {method_var: param for param, method_var in zip(params, method_sign)}
+            )
             var_name = tokens[0].value
             var = Variable(var_name, value.value, value._type)
             _locals[var.name] = var
@@ -51,7 +71,18 @@ def execute_context(context_token, _globals, _locals):
             param_tokens = tokens[1:]
             params = [_locals[token.value] for token in param_tokens]
             basic_op_map[op_name](*params, _locals=_locals)
-        # return op is missing
+        elif is_control_flow_op(tokens):
+            op_name = tokens[0].value
+            param_tokens = tokens[1:]
+            params = [_locals[token.value] for token in param_tokens]
+            next_line = control_flow_ops_map[op_name](
+                *params, line_number=line_numbers[i],_locals=_locals
+            )
+            if op_name == 'return':
+                return params[0]
+            else:
+                i = line_nb_to_ind[next_line]
+                continue
         i += 1
 
 def is_simple_assignment(tokens):
@@ -76,6 +107,9 @@ def is_result_method(tokens):
 def is_no_result_method(tokens):
     return tokens[0]._type == 'METHOD'
 
+def is_control_flow_op(tokens):
+    return tokens[0]._type == 'CTFL'
+
 class Tokenizer:
     def __init__(self):
         self.var_reg = r'[_a-zA-Z][_a-zA-Z0-9]*'
@@ -93,10 +127,12 @@ class Tokenizer:
         self.main_start_reg = r'^main_start:$'
         self.basic_result_ops = list(basic_result_op_map.keys())
         self.basic_no_result_ops = list(basic_no_result_op_map.keys())
+        self.control_flow_ops = list(control_flow_ops_map.keys())
         self.state = None
     
     def tokenise(self, source):
-        lines = [(i, line) for i, line in enumerate(source.split("\n")) if line]
+        # i starts with 0, but line numbers start at 1
+        lines = [(i+1, line) for i, line in enumerate(source.split("\n")) if line]
         all_tokens = {'main_tokens': defaultdict(list), 'method_tokens': defaultdict(dict)}
 
         tokeniser = Tokenizer()
@@ -159,7 +195,12 @@ class Tokenizer:
         elif re.match(self.no_result_op_reg, line):
             op_and_params = line
             op_name, params = self._get_op_name_and_params(op_and_params)
-            op_type = 'OP' if op_name in self.basic_no_result_ops else 'METHOD'
+            if op_name in self.basic_no_result_ops:
+                op_type = 'OP'
+            elif op_name in self.control_flow_ops:
+                op_type = 'CTFL'
+            else:
+                op_type = 'METHOD'
             params = params.split(',')
             return [Token(op_type, op_name)] + [Token(*self._get_value_type(param)) for param in params]
             
