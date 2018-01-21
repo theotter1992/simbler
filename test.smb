@@ -1,0 +1,22 @@
+def fib(n):
+    one=1
+    two=2
+    eql_one=eql(n,one)
+    eql_two=eql(n,two)
+    next1=10
+    next2=12
+    if(eql_one,next1)
+        return(one)
+    if(eql_two,next2)
+        return(one)
+    n_1=substr(n,one)
+    n_2=substr(n,two)
+    f1=fib(n_1)
+    f2=fib(n_2)
+    result=add(f1,f2)
+    return(result)
+
+main_start:
+    n=20
+    result=fib(n)
+    print(result)
