@@ -2,21 +2,79 @@ import re
 import pdb
 from collections import defaultdict
 
+from operators import *
+from smb_types import *
+
+basic_result_op_map = {
+    'add': add, 
+    'substr': substr, 
+    'mult': mult,
+    'div': div,
+    
+}
+
+basic_no_result_op_map = {
+    'return': return_op,
+    'print': print_op,
+    'if': if_op
+}
+
+basic_op_map = {**basic_result_op_map, **basic_no_result_op_map}
+
 def run(source):
     _globals = {}
-    _locals = {}
-    stack = [{0: _locals}]
     tokensier = Tokenizer()
     tokens = tokensier.tokenise(source)
-    pdb.set_trace()
     _globals.update(tokens)
+    execute_context(_globals['main_tokens'], _globals, {})
     
-    current_tokens = _globals['main_tokens']
-    line_nb_to_ind = {line_nb: i for i, line_nb in enumerate(current_tokens.keys())}
+
+def execute_context(context_token, _globals, _locals):
+    line_nb_to_ind = {line_nb: i for i, line_nb in enumerate(context_token.keys())}
+    line_numbers = sorted(context_token.keys())
     i = 0
-    while i < len(current_tokens):
-        tokens = current_tokens[i]
+    while i < len(context_token):
+        tokens = context_token[line_numbers[i]]
+        if is_simple_assignment(tokens):
+            var = Variable(tokens[0].value, tokens[2].value, tokens[2]._type)
+            _locals[var.name] = var
+        elif is_result_operator(tokens):
+            op_name = tokens[2].value
+            param_tokens = tokens[3:]
+            params = [_locals[token.value] for token in param_tokens]
+            value = basic_op_map[op_name](*params, _locals=_locals) 
+            var_name = tokens[0].value
+            var = Variable(var_name, value.value, value._type)
+            _locals[var.name] = var
+        elif is_no_result_operator(tokens):
+            op_name = tokens[0].value
+            param_tokens = tokens[1:]
+            params = [_locals[token.value] for token in param_tokens]
+            basic_op_map[op_name](*params, _locals=_locals)
+        # return op is missing
         i += 1
+
+def is_simple_assignment(tokens):
+    if len(tokens) != 3:
+        return False
+    return (tokens[0]._type == 'VAR' and tokens[1]._type == 'ASSIGN' and
+        (tokens[2]._type != 'OP' and tokens[2]._type != 'METHOD'))
+
+def is_result_operator(tokens):
+    if len(tokens) < 3:
+        return False
+    return (tokens[0]._type == 'VAR' and tokens[1]._type == 'ASSIGN' and tokens[2]._type == 'OP')
+
+def is_no_result_operator(tokens):
+    return tokens[0]._type == 'OP'
+
+def is_result_method(tokens):
+    if len(tokens) < 3:
+        return False
+    return (tokens[0]._type == 'VAR' and tokens[1]._type == 'ASSIGN' and tokens[2]._type == 'METHOD')
+
+def is_no_result_method(tokens):
+    return tokens[0]._type == 'METHOD'
 
 class Tokenizer:
     def __init__(self):
@@ -33,8 +91,8 @@ class Tokenizer:
         self.result_op_reg = rf'^{self.var_reg}={self.method_reg}\({self.params_reg}\)$'
         self.no_result_op_reg =  rf'^{self.method_reg}\({self.params_reg}\)$'
         self.main_start_reg = r'^main_start:$'
-        self.basic_result_ops = ['add', 'substr', 'mult', 'div']
-        self.basic_no_result_ops = ['return', 'print']
+        self.basic_result_ops = list(basic_result_op_map.keys())
+        self.basic_no_result_ops = list(basic_no_result_op_map.keys())
         self.state = None
     
     def tokenise(self, source):
@@ -46,7 +104,7 @@ class Tokenizer:
         is_main = False 
         for line_number, line in lines:
             tokens = tokeniser.get_tokens(line)
-            error = self.error_handling(tokens)
+            error = self.error_handling(tokens, line_number, line)
             if error:
                 return error
 
@@ -67,10 +125,9 @@ class Tokenizer:
             
         return all_tokens
 
-    def error_handling(self, tokens):
-        if tokens is None:    
-            return f'line number: {line_number} | Could not tokenise line \"{line}\"'
-
+    def error_handling(self, tokens, line_number, line):
+        if tokens is None:  
+            raise Exception(f'line number: {line_number} | Could not tokenise line \"{line}\"')  
 
     def _method_def_start(self, tokens):
         return tokens[0]._type == 'METHOD_DEF'
@@ -128,7 +185,7 @@ class Tokenizer:
             return 'FLT', float(value)
         elif re.match(f'{self.var_reg}$', value):
             return 'VAR', value
-        return 'NO_MATCH'
+        return 'NO_MATCH', None
 
     def _get_op_name_and_params(self, op_with_params):
         op_with_params = op_with_params.replace('(', ' ')
@@ -136,58 +193,6 @@ class Tokenizer:
         op_name, params = op_with_params.split(' ')
         return op_name, params
 
-class Token:
-    def __init__(self, token_type, value):
-        self._type = token_type
-        self.value = value
-    
-    def __repr__(self):
-        return f'Type: {self._type}, Value: {self.value}'
-
-def add(*args, _locals):
-    if len(args) != 2:
-        return 
-
-    if not all(arg._type in ['FLT', 'INT', 'VAR'] for arg in args):
-        return 
-        
-    return sum(arg.value for arg in args)
-
-def subtr(*args, _locals):
-    if len(args) != 2:
-        return 
-    if not all(arg._type in ['FLT', 'INT'] for arg in args):
-        return 
-    
-    arg1, arg2 = args
-    return arg1 - arg2
-
-def mult():
-    pass 
-
-def div():
-    pass
-
-def print():
-    pass
-
-class Method:
-    def __init__(self, name):
-        self.super()
-        self.name = name
-    
-    def execute(self, params, _globals, _locals):
-        pass
-
-class Value:
-    def __init__(self, value):
-        self.value = value
-        self._type = None
-
-class Variable(Value):
-    def __init__(self, name, value):
-        self.super(value)
-        self.name = name
 
 if __name__ == '__main__':
     with open('test.smb', 'r') as file:
